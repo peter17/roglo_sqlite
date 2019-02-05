@@ -51,7 +51,8 @@ class Process:
     def browse(self, url):
         #print('    ', url)
         response = requests.get(url)
-        soup = BeautifulSoup(response.text, "html.parser")
+        parts = response.text.split('<h3')
+        soup = BeautifulSoup(parts[0], "html.parser")
         sex = soup.select('h1 img')[0]['alt'].strip() if len(soup.select('h1 img')) > 0 else ''
         firstname = soup.select('h1 a')[0].text.strip() if len(soup.select('h1 a')) > 0 else ''
         lastname = soup.select('h1 a')[1].text.strip() if len(soup.select('h1 a')) > 1 else ''
@@ -68,11 +69,15 @@ class Process:
         DB.cur.execute('INSERT INTO people (firstname, lastname, sex, birthdate, birthplace, deathdate, deathplace, permalink) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', (firstname, lastname, sex, birthdate, birthplace, deathdate, deathplace, permalink))
         self.cache[url] = True
         DB.con.commit()
-        if response.text.find('<h3 class="highlight">Parents</h3>'):
-            parent1 = Process.extractQuery(soup.select('ul li[style] a')[0]['href'].strip()) if len(soup.select('ul li[style] a')) > 0 else ''
+        soup = BeautifulSoup(response.text, "html.parser")
+        start = soup.find('h3', text='Parents')
+        if start:
+            ul = start.findNext('ul')
+            links = ul.findAll('li')
+            parent1 = Process.extractQuery(links[0].find('a')['href'].strip()) if len(links) > 0 else ''
             if parent1 and Process.base + parent1 not in self.cache.keys():
                 self.browse(Process.base + parent1)
-            parent2 = Process.extractQuery(soup.select('ul li[style] a')[1]['href'].strip()) if len(soup.select('ul li[style] a')) > 1 else ''
+            parent2 = Process.extractQuery(links[1].find('a')['href'].strip()) if len(links) > 1 else ''
             if parent2 and Process.base + parent2 not in self.cache.keys():
                 self.browse(Process.base + parent2)
 
