@@ -7,6 +7,7 @@ import urllib.parse
 import requests
 import sqlite3
 import time
+import json
 import sys
 import re
 import os
@@ -17,8 +18,8 @@ class DB:
     cur = con.cursor()
 
     def update():
-        DB.cur.execute('CREATE TABLE IF NOT EXISTS people (firstname TEXT NOT NULL DEFAULT "", lastname TEXT NOT NULL DEFAULT "", sex TEXT, birthdate DATE, birthplace TEXT, deathdate DATE, deathplace TEXT, permalink TEXT, family_id INT, CONSTRAINT `unique_permalink` UNIQUE(permalink) ON CONFLICT REPLACE)')
-        DB.cur.execute('CREATE TABLE IF NOT EXISTS family(id INT NOT NULL, father_permalink TEXT, mother_permalink TEXT, wedding_date DATE, wedding_place TEXT, CONSTRAINT `unique_id` UNIQUE(id) ON CONFLICT REPLACE)')
+        DB.cur.execute('CREATE TABLE IF NOT EXISTS people (firstname TEXT NOT NULL DEFAULT "", lastname TEXT NOT NULL DEFAULT "", sex TEXT, birthdate DATE, birthplace TEXT, deathdate DATE, deathplace TEXT, permalink TEXT PRIMARY KEY, family_id INT, CONSTRAINT `unique_permalink` UNIQUE(permalink) ON CONFLICT REPLACE)')
+        DB.cur.execute('CREATE TABLE IF NOT EXISTS family (id TEXT PRIMARY KEY, father_permalink TEXT, mother_permalink TEXT, wedding_date DATE, wedding_place TEXT, CONSTRAINT `unique_id` UNIQUE(id) ON CONFLICT REPLACE)')
         DB.con.commit()
 
 class Process:
@@ -32,6 +33,10 @@ class Process:
         if not len(self.cache) and os.path.isfile(self.filename) and os.path.getmtime(self.filename) > time.time() - 12 * 3600 and os.path.getsize(self.filename) > 0:
             with open(self.filename, 'r', encoding='utf-8') as f:
                 self.cache = json.load(f)
+
+    def save_caches(self):
+        with open(self.filename, 'w') as f:
+            json.dump(self.cache, f)
 
     def extractParams(href):
         str1 = Process.extractQuery(href)
@@ -75,11 +80,18 @@ class Process:
             ul = start.findNext('ul')
             links = ul.findAll('li')
             parent1 = Process.extractQuery(links[0].find('a')['href'].strip()) if len(links) > 0 else ''
+            permalink1 = ''
             if parent1 and Process.base + parent1 not in self.cache.keys():
-                self.browse(Process.base + parent1)
+                permalink1 = self.browse(Process.base + parent1)
             parent2 = Process.extractQuery(links[1].find('a')['href'].strip()) if len(links) > 1 else ''
+            permalink2 = ''
             if parent2 and Process.base + parent2 not in self.cache.keys():
-                self.browse(Process.base + parent2)
+                permalink2 = self.browse(Process.base + parent2)
+            if permalink1 or permalink2:
+                family_id = permalink1 + '#' + permalink2
+                DB.cur.execute('INSERT INTO family (id, father_permalink, mother_permalink) VALUES (?, ?, ?)', (family_id, permalink1, permalink2))
+                DB.cur.execute('UPDATE people SET family_id = ? WHERE permalink = ?', (family_id, permalink))
+        return permalink
 
 if __name__ == '__main__':
     DB.update()
@@ -88,5 +100,7 @@ if __name__ == '__main__':
     url = sys.argv[1] if len(sys.argv) > 1 else ''
     if (url):
         process.browse(url)
+        DB.con.commit()
+        process.save_caches()
     else:
         print('Please provide a URL')
