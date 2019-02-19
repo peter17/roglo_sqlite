@@ -75,22 +75,34 @@ class Process:
         self.cache[url] = True
         DB.con.commit()
         soup = BeautifulSoup(response.text, "html.parser")
-        start = soup.find('h3', text='Parents')
-        if start:
-            ul = start.findNext('ul')
+        parents = soup.find('h3', text='Parents')
+        if parents:
+            ul = parents.findNext('ul')
             links = ul.findAll('li')
-            parent1 = Process.extractQuery(links[0].find('a')['href'].strip()) if len(links) > 0 else ''
-            permalink1 = ''
-            if parent1 and Process.base + parent1 not in self.cache.keys():
-                permalink1 = self.browse(Process.base + parent1)
-            parent2 = Process.extractQuery(links[1].find('a')['href'].strip()) if len(links) > 1 else ''
-            permalink2 = ''
-            if parent2 and Process.base + parent2 not in self.cache.keys():
-                permalink2 = self.browse(Process.base + parent2)
-            if permalink1 or permalink2:
-                family_id = permalink1 + '#' + permalink2
-                DB.cur.execute('INSERT INTO family (id, father_permalink, mother_permalink) VALUES (?, ?, ?)', (family_id, permalink1, permalink2))
+            father = Process.extractQuery(links[0].find('a')['href'].strip()) if len(links) > 0 else ''
+            father_permalink = ''
+            if father and Process.base + father not in self.cache.keys():
+                father_permalink = self.browse(Process.base + father)
+            mother = Process.extractQuery(links[1].find('a')['href'].strip()) if len(links) > 1 else ''
+            mother_permalink = ''
+            if mother and Process.base + mother not in self.cache.keys():
+                mother_permalink = self.browse(Process.base + mother)
+            if father_permalink or mother_permalink:
+                family_id = father_permalink + '#' + mother_permalink
+                DB.cur.execute('INSERT INTO family (id, father_permalink, mother_permalink) VALUES (?, ?, ?)', (family_id, father_permalink, mother_permalink))
                 DB.cur.execute('UPDATE people SET family_id = ? WHERE permalink = ?', (family_id, permalink))
+        spouses = soup.find('h3', text='Spouses and children')
+        if spouses:
+            ul = spouses.findNext('ul')
+            links = ul.findAll('b')
+            spouse1 = Process.extractQuery(links[0].find('a')['href'].strip()) if len(links) > 0 else ''
+            if spouse1 and Process.base + spouse1 not in self.cache.keys():
+                spouse_permalink = self.browse(Process.base + spouse1)
+                dict1 = Process.extractParams(ul.select('li a.date')[0]['href'].strip()) if len(ul.select('li a.date')) > 0 else {}
+                wedding_date = Process.dictToDate(dict1)
+                wedding_place = ul.select('li script')[0].text.strip().split('"')[1] if len(ul.select('li script')) > 0 else ''
+                family_id = (permalink + '#' + spouse_permalink) if sex == 'M' else (spouse_permalink + '#' + permalink)
+                DB.cur.execute('UPDATE family SET wedding_date = ?, wedding_place = ? WHERE id = ?', (wedding_date, wedding_place, family_id))
         return permalink
 
 if __name__ == '__main__':
