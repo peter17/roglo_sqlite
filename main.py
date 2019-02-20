@@ -22,6 +22,17 @@ class DB:
         DB.cur.execute('CREATE TABLE IF NOT EXISTS family (id TEXT PRIMARY KEY, father_permalink TEXT, mother_permalink TEXT, wedding_date DATE, wedding_place TEXT, CONSTRAINT `unique_id` UNIQUE(id) ON CONFLICT REPLACE)')
         DB.con.commit()
 
+
+class People:
+    def __init__(self):
+        self.firstname = self.lastname = self.sex = self.birthdate = self.birthplace = self.deathdate = self.deathplace = self.permalink = ''
+
+    def __str__(self):
+        return ' '.join(map(str, (self.sex, self.firstname, self.lastname, self.permalink, self.birthdate, self.deathdate, self.birthplace, self.deathplace)))
+
+    def save(self, DB):
+        DB.cur.execute('INSERT INTO people (firstname, lastname, sex, birthdate, birthplace, deathdate, deathplace, permalink) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', (self.firstname, self.lastname, self.sex, self.birthdate, self.birthplace, self.deathdate, self.deathplace, self.permalink))
+
 class Process:
     base = 'http://roglo.eu/roglo?'
 
@@ -58,20 +69,21 @@ class Process:
         response = requests.get(url)
         parts = response.text.split('<h3')
         soup = BeautifulSoup(parts[0], "html.parser")
-        sex = soup.select('h1 img')[0]['alt'].strip() if len(soup.select('h1 img')) > 0 else ''
-        firstname = soup.select('h1 a')[0].text.strip() if len(soup.select('h1 a')) > 0 else ''
-        lastname = soup.select('h1 a')[1].text.strip() if len(soup.select('h1 a')) > 1 else ''
+        people = People()
+        people.sex = soup.select('h1 img')[0]['alt'].strip() if len(soup.select('h1 img')) > 0 else ''
+        people.firstname = soup.select('h1 a')[0].text.strip() if len(soup.select('h1 a')) > 0 else ''
+        people.lastname = soup.select('h1 a')[1].text.strip() if len(soup.select('h1 a')) > 1 else ''
         permalink_ = soup.select('h1 input')[0]['value'].strip() if len(soup.select('h1 input')) > 0 else ''
         parts = permalink_.replace('[', '').replace(']', '').split('/')
-        permalink = ('p=%s;n=%s;' % (parts[0], parts[1]) + ('oc=%s' % (parts[2],) if parts[2] !='0' else '')) if len(parts) > 2 else ''
+        people.permalink = ('p=%s;n=%s;' % (parts[0], parts[1]) + ('oc=%s' % (parts[2],) if parts[2] !='0' else '')) if len(parts) > 2 else ''
         dict1 = Process.extractParams(soup.select('ul li a.date')[0]['href'].strip()) if len(soup.select('ul li a.date')) > 0 else {}
-        birthdate = Process.dictToDate(dict1)
+        people.birthdate = Process.dictToDate(dict1)
         dict2 = Process.extractParams(soup.select('ul li a.date')[1]['href'].strip()) if len(soup.select('ul li a.date')) > 1 else {}
-        deathdate = Process.dictToDate(dict2)
-        birthplace = soup.select('ul li script')[0].text.strip().split('"')[1] if len(soup.select('ul li script')) > 0 else ''
-        deathplace = soup.select('ul li script')[0].text.strip().split('"')[1] if len(soup.select('ul li script')) > 0 else ''
-        print(sex, firstname, lastname, permalink, birthdate, deathdate, birthplace, deathplace)
-        DB.cur.execute('INSERT INTO people (firstname, lastname, sex, birthdate, birthplace, deathdate, deathplace, permalink) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', (firstname, lastname, sex, birthdate, birthplace, deathdate, deathplace, permalink))
+        people.deathdate = Process.dictToDate(dict2)
+        people.birthplace = soup.select('ul li script')[0].text.strip().split('"')[1] if len(soup.select('ul li script')) > 0 else ''
+        people.deathplace = soup.select('ul li script')[0].text.strip().split('"')[1] if len(soup.select('ul li script')) > 0 else ''
+        print(people)
+        people.save(DB)
         self.cache[url] = True
         DB.con.commit()
         soup = BeautifulSoup(response.text, "html.parser")
@@ -79,31 +91,27 @@ class Process:
         if parents:
             ul = parents.findNext('ul')
             links = ul.findAll('li')
-            father = Process.extractQuery(links[0].find('a')['href'].strip()) if len(links) > 0 else ''
-            father_permalink = ''
-            if father and Process.base + father not in self.cache.keys():
-                father_permalink = self.browse(Process.base + father)
-            mother = Process.extractQuery(links[1].find('a')['href'].strip()) if len(links) > 1 else ''
-            mother_permalink = ''
-            if mother and Process.base + mother not in self.cache.keys():
-                mother_permalink = self.browse(Process.base + mother)
-            if father_permalink or mother_permalink:
-                family_id = father_permalink + '#' + mother_permalink
-                DB.cur.execute('INSERT INTO family (id, father_permalink, mother_permalink) VALUES (?, ?, ?)', (family_id, father_permalink, mother_permalink))
-                DB.cur.execute('UPDATE people SET family_id = ? WHERE permalink = ?', (family_id, permalink))
+            father_ = Process.extractQuery(links[0].find('a')['href'].strip()) if len(links) > 0 else ''
+            father = self.browse(Process.base + father_) if father_ and Process.base + father_ not in self.cache.keys() else People()
+            mother_ = Process.extractQuery(links[1].find('a')['href'].strip()) if len(links) > 1 else ''
+            mother = self.browse(Process.base + mother_) if mother_ and Process.base + mother_ not in self.cache.keys() else People()
+            if father.permalink or mother.permalink:
+                family_id = father.permalink + '#' + mother.permalink
+                DB.cur.execute('INSERT INTO family (id, father_permalink, mother_permalink) VALUES (?, ?, ?)', (family_id, father.permalink, mother.permalink))
+                DB.cur.execute('UPDATE people SET family_id = ? WHERE permalink = ?', (family_id, people.permalink))
         spouses = soup.find('h3', text='Spouses and children')
         if spouses:
             ul = spouses.findNext('ul')
             links = ul.findAll('b')
-            spouse1 = Process.extractQuery(links[0].find('a')['href'].strip()) if len(links) > 0 else ''
-            if spouse1 and Process.base + spouse1 not in self.cache.keys():
-                spouse_permalink = self.browse(Process.base + spouse1)
+            spouse_ = Process.extractQuery(links[0].find('a')['href'].strip()) if len(links) > 0 else ''
+            if spouse_ and Process.base + spouse_ not in self.cache.keys():
+                spouse = self.browse(Process.base + spouse_)
                 dict1 = Process.extractParams(ul.select('li a.date')[0]['href'].strip()) if len(ul.select('li a.date')) > 0 else {}
                 wedding_date = Process.dictToDate(dict1)
                 wedding_place = ul.select('li script')[0].text.strip().split('"')[1] if len(ul.select('li script')) > 0 else ''
-                family_id = (permalink + '#' + spouse_permalink) if sex == 'M' else (spouse_permalink + '#' + permalink)
+                family_id = (people.permalink + '#' + spouse.permalink) if people.sex == 'M' else (spouse.permalink + '#' + people.permalink)
                 DB.cur.execute('UPDATE family SET wedding_date = ?, wedding_place = ? WHERE id = ?', (wedding_date, wedding_place, family_id))
-        return permalink
+        return people
 
 if __name__ == '__main__':
     DB.update()
